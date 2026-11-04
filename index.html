@@ -296,7 +296,7 @@ const LINES=['회의를 위한 회의 좀 그만해','퇴근 5분 전에 일 주
  '월요일 아침 9시 회의 누가 만들었냐','제 이름은 “이거 하나만”이 아닙니다','점심 메뉴 정하는 게 업무보다 어렵다','엑셀에 셀 병합 하지 마세요 제발',
  '요구사항 배포 전날 바꾸기 금지','로컬에선 됐다고요!!!','연차 쓰는데 사유가 왜 필요해','“확인 부탁드립니다”만 열 번째',
  '단톡방에 밤 11시에 공지 올리지 마','그건 제 업무가 아닌데요… 라고 말하고 싶다','퇴근하고 싶다 출근했는데','다음 주까지면 다음 주 금요일 밤 아니죠?'];
-const npcs=NPC_NAMES.map((n,i)=>{
+const npcs=[].map((n,i)=>{ // NPC 제거
   const a=Math.random()*TAU,r=6+Math.random()*20;
   return {x:Math.cos(a)*r,z:Math.sin(a)*r,rot:0,tx:0,tz:0,idle:Math.random()*2,speed:1.5+Math.random()*0.9,
     nm:n,next:3+Math.random()*18,av:makeAvatar(SHIRTS[i%SHIRTS.length],TIES[i%TIES.length],n,'#EDE6CF')};
@@ -436,7 +436,6 @@ $('#enter').addEventListener('click',()=>{
 // 시작 분위기용 외침 몇 개
 (document.fonts&&document.fonts.load?Promise.race([Promise.all([document.fonts.load('58px "Nanum Pen Script"'),document.fonts.load('26px "Gowun Dodum"')]),new Promise(r=>setTimeout(r,2500))]):Promise.resolve()).then(()=>{
   const seed=[...LINES].sort(()=>Math.random()-0.5).slice(0,5);
-  seed.forEach((l,i)=>{const a=Math.random()*TAU,r=4+Math.random()*12;addShout(l,Math.cos(a)*r,Math.sin(a)*r,false,null,10+i*8);});
 });
 
 // ---------- 함께 걷기 (Supabase Realtime) ----------
