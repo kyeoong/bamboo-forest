@@ -130,7 +130,7 @@ window.FOREST_CONFIG = {
 };
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.98.0/dist/umd/supabase.js"></script>
 <script>
 (function(){
 const $=s=>document.querySelector(s);
@@ -445,7 +445,8 @@ let ch=null,connected=false,others=0,lastSent=0,lastPX=999,lastPZ=999,lastPR=999
 const num=(v,d)=>typeof v==='number'&&isFinite(v)?Math.max(-42,Math.min(42,v)):d;
 function hash(k){let h=0;for(const c of String(k))h=(h*31+c.charCodeAt(0))>>>0;return h;}
 function updatePpl(){
-  $('#ppl').textContent=!ch?'혼자 걷는 중':!connected?'숲에 연결하는 중':(others>0?`지금 숲에 ${others+1}명`:'숲에 나 혼자예요');
+  const err=chStatus==='CHANNEL_ERROR'||chStatus==='TIMED_OUT'||chStatus==='CLOSED';
+  $('#ppl').textContent=chStatus==='lib'?'연결 도구를 못 불러왔어요':!ch?'혼자 걷는 중':err?'숲 연결 실패 ('+chStatus+')':!connected?'숲에 연결하는 중':(others>0?`지금 숲에 ${others+1}명`:'숲에 나 혼자예요');
 }
 function ensureRemote(key,meta){
   let r=remotes.get(key);
@@ -454,7 +455,7 @@ function ensureRemote(key,meta){
     const x=num(meta&&meta.x,0),z=num(meta&&meta.z,0);
     const def='익명의 직장인 '+(h%90+10);
     r={def,name:'',av:makeAvatar(SHIRTS[Math.abs(c)%SHIRTS.length],TIES[Math.abs(t)%TIES.length],def,'#CFE3C4'),
-       x,z,tx:x,tz:z,rot:0,tr:0,mv:false,lastMove:0};
+       x,z,tx:x,tz:z,rot:0,tr:0,mv:false,lastMove:0,seen:performance.now()};
     remotes.set(key,r);
   }
   return r;
@@ -469,12 +470,13 @@ function handleShout(s,r){
   if(age<15)addLog(r.name||r.def,mask(s.txt).out.slice(0,60));
   const o=seen.get(s.id);if(o&&k){o.likes=k;redraw(o);}
 }
+let chStatus='';
 function trackPresence(){
   if(!ch||!connected)return;
   const now=Date.now();
   while(myShouts.length&&now-myShouts[0].at>60000)myShouts.shift();
-  ch.track({n:me.n,c:me.c,t:me.t,x:+player.x.toFixed(1),z:+player.z.toFixed(1),
-    s:myShouts.map(o=>({id:o.id,txt:o.txt,at:o.at,x:o.x,z:o.z,k:o.likes}))}).catch(()=>{});
+  ch.send({type:'broadcast',event:'hb',payload:{id:me.id,n:me.n,c:me.c,t:me.t,x:+player.x.toFixed(1),z:+player.z.toFixed(1),
+    s:myShouts.map(o=>({id:o.id,txt:o.txt,at:o.at,x:o.x,z:o.z,k:o.likes}))}});
 }
 function sendMove(mv){
   if(!ch||!connected)return;const now=performance.now();
@@ -485,13 +487,26 @@ function sendMove(mv){
 }
 (function connect(){
   const cfg=window.FOREST_CONFIG||{};
-  if(!window.supabase||!cfg.SUPABASE_URL||!cfg.SUPABASE_KEY){updatePpl();return;}
+  if(!window.supabase){chStatus='lib';updatePpl();return;}
+  if(!cfg.SUPABASE_URL||!cfg.SUPABASE_KEY){updatePpl();return;}
   const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_KEY);
-  ch=sb.channel('bamboo-forest',{config:{presence:{key:me.id},broadcast:{self:false}}});
+  ch=sb.channel('bamboo-forest',{config:{broadcast:{self:false}}});
+  let replyT=null;
+  ch.on('broadcast',{event:'hb'},({payload:p})=>{
+    if(!p||typeof p.id!=='string'||p.id===me.id)return;
+    const isNew=!remotes.has(p.id);
+    const r=ensureRemote(p.id,p);r.seen=performance.now();
+    const nm=cleanNick(p.n);if(nm!==r.name){r.name=nm;setLabel(r.av,nm||r.def,'#CFE3C4');}
+    if(performance.now()-r.lastMove>2500){r.tx=num(p.x,r.tx);r.tz=num(p.z,r.tz);r.mv=false;}
+    if(Array.isArray(p.s))p.s.slice(0,8).forEach(o=>handleShout(o,r));
+    if(isNew){clearTimeout(replyT);replyT=setTimeout(trackPresence,300+Math.random()*500);}
+    others=remotes.size;updatePpl();
+  });
   ch.on('broadcast',{event:'move'},({payload:p})=>{
     if(!p||typeof p.id!=='string'||p.id===me.id)return;
-    const r=ensureRemote(p.id,null);
+    const r=ensureRemote(p.id,null);r.seen=performance.now();
     r.tx=num(p.x,r.tx);r.tz=num(p.z,r.tz);r.tr=num(p.r,r.tr);r.mv=!!p.m;r.lastMove=performance.now();
+    others=remotes.size;updatePpl();
   });
   ch.on('broadcast',{event:'like'},({payload:p})=>{
     if(!p||typeof p.id!=='string'||typeof p.from!=='string')return;
@@ -500,25 +515,18 @@ function sendMove(mv){
       const o=seen.get(p.id);if(o){o.likes=mine.likes;redraw(o);}trackPresence();toast('누군가 내 외침에 👊 공감했어요');return;}
     const o=seen.get(p.id);if(o){o.likes++;redraw(o);}
   });
-  ch.on('presence',{event:'sync'},()=>{
-    const st=ch.presenceState(),alive=new Set();
-    for(const key in st){
-      if(key===me.id)continue;
-      const metas=st[key];const meta=metas&&metas[metas.length-1];if(!meta)continue;
-      alive.add(key);const r=ensureRemote(key,meta);
-      const nm=cleanNick(meta.n);if(nm!==r.name){r.name=nm;setLabel(r.av,nm||r.def,'#CFE3C4');}
-      if(performance.now()-r.lastMove>2500){r.tx=num(meta.x,r.tx);r.tz=num(meta.z,r.tz);r.mv=false;}
-      if(Array.isArray(meta.s))meta.s.slice(0,8).forEach(s=>handleShout(s,r));
-    }
-    for(const [k,r] of remotes)if(!alive.has(k)){scene.remove(r.av);remotes.delete(k);}
-    others=alive.size;updatePpl();
-  });
-  ch.subscribe(status=>{
+  ch.subscribe((status,err)=>{
+    chStatus=status;
     if(status==='SUBSCRIBED'){connected=true;trackPresence();}
-    else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){connected=false;}
+    else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){connected=false;if(err)console.warn('realtime',status,err);}
     updatePpl();
   });
-  setInterval(trackPresence,5000);
+  setInterval(trackPresence,2000);
+  setInterval(()=>{
+    const now=performance.now();let changed=false;
+    for(const [k,r] of remotes)if(now-(r.seen||0)>7000){scene.remove(r.av);remotes.delete(k);changed=true;}
+    if(changed){others=remotes.size;updatePpl();}
+  },1000);
 })();
 
 $('#share').addEventListener('click',async()=>{
